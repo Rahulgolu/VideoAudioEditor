@@ -13,25 +13,38 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.editor.app.ui.screens.CloudBackupSheet
 import com.editor.app.ui.screens.EditorScreen
 import com.editor.app.ui.screens.HomeScreen
 import com.editor.app.ui.screens.PermissionScreen
+import com.editor.app.ui.screens.TemplatesSheet
+import com.editor.app.ui.screens.SettingsSheet
+import com.editor.app.ui.screens.NotificationsSheet
 import com.editor.app.ui.theme.VideoAudioEditorTheme
 import com.editor.app.viewmodel.EditorViewModel
 import com.editor.app.viewmodel.HomeViewModel
+import com.editor.app.utils.ThemePreferences
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        val themePrefs = ThemePreferences(this)
+        
         setContent {
-            VideoAudioEditorTheme {
+            var themeMode by remember { mutableStateOf(themePrefs.themeMode) }
+            
+            VideoAudioEditorTheme(themeMode = themeMode) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.systemBars)
                 ) {
-                    AppNavigation()
+                    AppNavigation(
+                        themePrefs = themePrefs,
+                        onThemeChange = { themeMode = it }
+                    )
                 }
             }
         }
@@ -41,44 +54,63 @@ class MainActivity : ComponentActivity() {
 enum class Screen { PERMISSION, HOME, EDITOR }
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    themePrefs: ThemePreferences,
+    onThemeChange: (com.editor.app.ui.theme.ThemeMode) -> Unit
+) {
     var currentScreen by remember { mutableStateOf(Screen.PERMISSION) }
+    var showTemplates by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showNotifications by remember { mutableStateOf(false) }
+    var showCloudBackup by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Both ViewModels live at navigation scope — survive tab switches and screen rotation.
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(context))
     val editorViewModel: EditorViewModel = viewModel(factory = EditorViewModel.factory(context))
 
     when (currentScreen) {
 
-        // ── 1. Permission gate ─────────────────────────────────────────────────
         Screen.PERMISSION -> PermissionScreen(
             onPermissionsGranted = { currentScreen = Screen.HOME }
         )
 
-        // ── 2. Home — project list ─────────────────────────────────────────────
-        Screen.HOME -> HomeScreen(
-            homeViewModel = homeViewModel,
+        Screen.HOME -> {
+            HomeScreen(
+                homeViewModel = homeViewModel,
+                onNewProject = {
+                    editorViewModel.newProject()
+                    currentScreen = Screen.EDITOR
+                },
+                onOpenProject = { projectId ->
+                    editorViewModel.loadProject(projectId)
+                    currentScreen = Screen.EDITOR
+                },
+                onTemplatesClick = { showTemplates = true },
+                onSettingsClick = { showSettings = true },
+                onNotificationsClick = { showNotifications = true },
+                onCloudBackupClick = { showCloudBackup = true }
+            )
+            if (showTemplates) TemplatesSheet(
+                onDismiss = { showTemplates = false },
+                onSelectTemplate = { template ->
+                    editorViewModel.newProjectFromTemplate(template)
+                    currentScreen = Screen.EDITOR
+                    showTemplates = false
+                }
+            )
+            if (showSettings) SettingsSheet(
+                onDismiss = { showSettings = false }
+            )
+            if (showNotifications) NotificationsSheet(onDismiss = { showNotifications = false })
+            if (showCloudBackup) CloudBackupSheet(
+                onDismiss = { showCloudBackup = false }
+            )
+        }
 
-            // "New Video / Audio / Import / Templates" — always starts blank editor
-            onNewProject = {
-                editorViewModel.newProject()
-                currentScreen = Screen.EDITOR
-            },
-
-            // Tap an existing project card → load it and open editor
-            onOpenProject = { projectId ->
-                editorViewModel.loadProject(projectId)
-                currentScreen = Screen.EDITOR
-            }
-        )
-
-        // ── 3. Editor ─────────────────────────────────────────────────────────
         Screen.EDITOR -> EditorScreen(
             viewModel = editorViewModel,
             onBack = {
                 currentScreen = Screen.HOME
-                // Refresh project list so any saves made in editor appear immediately
                 homeViewModel.refresh()
             }
         )

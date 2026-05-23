@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.editor.app.data.*
 import com.editor.app.repository.ProjectRepository
+import com.editor.app.ui.screens.ProjectTemplate
 import com.editor.app.utils.AudioMixEngine
 import com.editor.app.utils.PlayerManager
 import com.editor.app.utils.VoiceRecorder
@@ -109,14 +110,12 @@ class EditorViewModel(context: Context) : ViewModel() {
 
     // ─── Playback ─────────────────────────────────────────────────────────────
 
-    // REPLACE existing togglePlayPause with this:
     fun togglePlayPause() {
         if (hasRealVideo) {
             if (playerManager.isPlaying()) {
                 playerManager.pause()
                 audioMixEngine.pauseAll()
             } else {
-                // ← ADD THIS: reset player if it reached end state
                 if (playerManager.player.playbackState == androidx.media3.common.Player.STATE_ENDED) {
                     playerManager.player.seekTo(0)
                     playerManager.player.prepare()
@@ -146,7 +145,6 @@ class EditorViewModel(context: Context) : ViewModel() {
         _uiState.update { it.copy(currentPositionMs = clamped) }
         if (hasRealVideo) {
             playerManager.seekTo(clamped)
-            // ← ADD THIS: if player ended, prepare it again so it can replay
             if (playerManager.player.playbackState == androidx.media3.common.Player.STATE_ENDED) {
                 playerManager.player.seekTo(clamped)
                 playerManager.player.prepare()
@@ -237,7 +235,6 @@ class EditorViewModel(context: Context) : ViewModel() {
         }
     }
 
-    // REPLACE existing setTrackVolume with this:
     fun setTrackVolume(trackId: String, volume: Float) {
         _uiState.update { state ->
             state.copy(tracks = state.tracks.map { track ->
@@ -260,6 +257,28 @@ class EditorViewModel(context: Context) : ViewModel() {
                 if (track.id == trackId) track.copy(pan = pan.coerceIn(-1f, 1f)) else track
             })
         }
+    }
+
+    fun setTrackEqBand(trackId: String, bandIndex: Int, value: Float) {
+        _uiState.update { state ->
+            state.copy(tracks = state.tracks.map { track ->
+                if (track.id != trackId) return@map track
+                val newBands = track.eqBands.toMutableList()
+                newBands[bandIndex] = value.coerceIn(-12f, 12f)
+                track.copy(eqBands = newBands)
+            })
+        }
+        audioMixEngine.setEqBands(trackId, _uiState.value.tracks.find { it.id == trackId }?.eqBands ?: listOf(0f, 0f, 0f, 0f, 0f))
+    }
+
+    fun setTrackFx(trackId: String, fxType: String, intensity: Float) {
+        _uiState.update { state ->
+            state.copy(tracks = state.tracks.map { track ->
+                if (track.id != trackId) return@map track
+                track.copy(fxType = fxType, fxIntensity = intensity.coerceIn(0f, 1f))
+            })
+        }
+        audioMixEngine.setFx(trackId, fxType, intensity)
     }
 
     // ─── Clip Operations ──────────────────────────────────────────────────────
@@ -381,6 +400,22 @@ class EditorViewModel(context: Context) : ViewModel() {
         }
     }
 
+    fun setEffectBlend(effectId: String, blend: Float) {
+        _uiState.update { state ->
+            state.copy(effects = state.effects.map { effect ->
+                if (effect.id == effectId) effect.copy(blend = blend.coerceIn(0f, 1f)) else effect
+            })
+        }
+    }
+
+    fun setEffectFade(effectId: String, fade: Float) {
+        _uiState.update { state ->
+            state.copy(effects = state.effects.map { effect ->
+                if (effect.id == effectId) effect.copy(fade = fade.coerceIn(0f, 1f)) else effect
+            })
+        }
+    }
+
     // ─── Text Overlays ────────────────────────────────────────────────────────
 
     fun addTextOverlay(text: String, style: String, color: androidx.compose.ui.graphics.Color) {
@@ -403,16 +438,74 @@ class EditorViewModel(context: Context) : ViewModel() {
         _uiState.update { it.copy(exportConfig = config) }
     }
 
-    fun startExport() {
+    fun startExport(context: android.content.Context) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isExporting = true, exportProgress = 0f) }
-            repeat(100) { i ->
-                delay(60L)
-                _uiState.update { it.copy(exportProgress = (i + 1) / 100f) }
+            // Reset export state
+            _uiState.update {
+                it.copy(
+                    isExporting      = true,
+                    exportProgress   = 0f,
+                    exportError      = null,
+                    exportedFileUri  = null,
+                    exportedFilePath = null,
+                    isSimulatedExport = false
+                )
             }
-            _uiState.update { it.copy(isExporting = false, exportProgress = 0f) }
+
+            try {
+                val result = com.editor.app.utils.VideoExporter.export(
+                    context    = context,
+                    state      = _uiState.value,
+                    onProgress = { progress ->
+                        _uiState.update { it.copy(exportProgress = progress) }
+                    }
+                )
+
+                // ✅ Real export succeeded — file exists on device
+                _uiState.update {
+                    it.copy(
+                        isExporting       = false,
+                        exportProgress    = 1f,
+                        exportedFileUri   = result.contentUri.toString(),
+                        exportedFilePath  = result.filePath,
+                        isSimulatedExport = false
+                    )
+                }
+
+            } catch (e: com.editor.app.utils.NoVideoClipsException) {
+                // No real video imported yet → run demo simulation
+                // (does NOT set isSimulatedExport=false, so UI can warn user)
+                simulateExport()
+
+            } catch (e: Exception) {
+                // Real export attempted but failed (codec error, permission, etc.)
+                // Show the actual error — do NOT silently simulate
+                android.util.Log.e("VideoExporter", "Export failed", e)
+                _uiState.update {
+                    it.copy(
+                        isExporting    = false,
+                        exportProgress = 0f,
+                        exportError    = buildErrorMessage(e)
+                    )
+                }
+            }
         }
     }
+
+    // Formats a user-friendly error message from the exception
+    private fun buildErrorMessage(e: Exception): String {
+        return when {
+            e.message?.contains("permission", ignoreCase = true) == true ->
+                "Storage permission denied. Grant storage access in Settings."
+            e.message?.contains("codec", ignoreCase = true) == true ->
+                "Video codec not supported on this device."
+            e.message?.contains("output", ignoreCase = true) == true ->
+                "Could not write output file. Check available storage."
+            else ->
+                "Export failed: ${e.message ?: "Unknown error"}"
+        }
+    }
+
 
     // ─── Undo / Redo ──────────────────────────────────────────────────────────
 
@@ -552,8 +645,6 @@ class EditorViewModel(context: Context) : ViewModel() {
             pushUndoSnapshot()
             addClipToTrack("audio_1", clip)
 
-            // ← REMOVED playerManager.loadUri() — don't overwrite video
-            // Load audio into AudioMixEngine instead
             audioMixEngine.loadTrack(
                 trackId = "audio_1_${clip.id}",
                 uriString = uri.toString(),
@@ -564,7 +655,6 @@ class EditorViewModel(context: Context) : ViewModel() {
         }
     }
 
-    // ← ADD HERE
     fun syncAudioEngine() {
         val state = _uiState.value
         state.tracks.forEach { track ->
@@ -607,8 +697,6 @@ class EditorViewModel(context: Context) : ViewModel() {
             pushUndoSnapshot()
             addClipToTrack("video_1", clip)
 
-            // Only show image preview if NO video is loaded
-            // ← CHANGED: only set previewImageUri if no real video
             if (!hasRealVideo) {
                 _uiState.update { it.copy(previewImageUri = uri.toString()) }
             }
@@ -708,6 +796,23 @@ class EditorViewModel(context: Context) : ViewModel() {
         stopPositionSync()
         playerManager.pause()
         _uiState.value = EditorUiState()
+        hasRealVideo = false
+    }
+
+    fun newProjectFromTemplate(template: ProjectTemplate) {
+        stopPositionSync()
+        playerManager.pause()
+        val newTracks = template.tracks.map { track ->
+            track.copy(id = "${track.id}_${System.currentTimeMillis()}")
+        }
+        val newEffects = template.effects.map { effect ->
+            effect.copy(id = "${effect.id}_${System.currentTimeMillis()}")
+        }
+        _uiState.value = EditorUiState(
+            projectName = template.name,
+            tracks = newTracks,
+            effects = newEffects
+        )
         hasRealVideo = false
     }
 
@@ -852,6 +957,60 @@ class EditorViewModel(context: Context) : ViewModel() {
                     clip.copy(transition = transition)
                 })
             })
+        }
+    }
+
+    fun setClipVolume(trackId: String, clipId: String, volume: Float) {
+        _uiState.update { state ->
+            state.copy(tracks = state.tracks.map { track ->
+                if (track.id != trackId) return@map track
+                track.copy(clips = track.clips.map { clip ->
+                    if (clip.id != clipId) return@map clip
+                    clip.copy(volume = volume.coerceIn(0f, 2f))
+                })
+            })
+        }
+        // Live-update the AudioMixEngine for real playback volume
+        val track = _uiState.value.tracks.find { it.id == trackId } ?: return
+        val clip  = track.clips.find { it.id == clipId } ?: return
+        if (clip.uri != null) {
+            audioMixEngine.setTrackVolume(
+                trackId = "${trackId}_${clipId}",
+                volume  = volume.coerceIn(0f, 2f),
+                pan     = track.pan,
+                isMuted = track.isMuted || clip.isMuted
+            )
+        }
+    }
+
+    fun setClipSpeed(trackId: String, clipId: String, speed: Float) {
+        pushUndoSnapshot()
+        _uiState.update { state ->
+            state.copy(tracks = state.tracks.map { track ->
+                if (track.id != trackId) return@map track
+                track.copy(clips = track.clips.map { clip ->
+                    if (clip.id != clipId) return@map clip
+                    clip.copy(speed = speed.coerceIn(0.25f, 4f))
+                })
+            })
+        }
+        // If this is the currently loaded clip in ExoPlayer, update playback speed
+        playerManager.setPlaybackSpeed(speed.coerceIn(0.25f, 4f))
+    }
+
+    private suspend fun simulateExport() {
+        repeat(100) { i ->
+            kotlinx.coroutines.delay(50L)
+            _uiState.update { it.copy(exportProgress = (i + 1) / 100f) }
+        }
+        _uiState.update {
+            it.copy(
+                isExporting       = false,
+                exportProgress    = 1f,
+                exportedFileUri   = null,         // ← intentionally null: no real file
+                exportedFilePath  = null,
+                isSimulatedExport = true          // ← flag tells UI to show demo message
+            )
         }
     }
 }

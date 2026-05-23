@@ -4,32 +4,41 @@ import android.content.Context
 import com.editor.app.data.*
 import com.editor.app.data.db.AppDatabase
 import com.editor.app.data.db.ProjectEntity
+import com.editor.app.utils.ThumbnailManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.UUID
 
-class ProjectRepository(context: Context) {
+class ProjectRepository(private val context: Context) {
 
-    private val dao = AppDatabase.getInstance(context).projectDao()
+    private val dao  = AppDatabase.getInstance(context).projectDao()
     private val gson = Gson()
 
     // ─── Save ─────────────────────────────────────────────────────────────────
 
     suspend fun saveProject(state: EditorUiState): String {
-        val id = if (state.projectId.isBlank()) UUID.randomUUID().toString()
-        else state.projectId
+        val id  = if (state.projectId.isBlank()) UUID.randomUUID().toString() else state.projectId
         val now = System.currentTimeMillis()
 
+        // Find the first real video URI to generate / refresh the thumbnail
+        val firstVideoUri = state.tracks
+            .flatMap { it.clips }
+            .firstOrNull { it.type == ClipType.VIDEO && it.uri != null }
+            ?.uri
+
+        val thumbUri = ThumbnailManager.getOrCreate(context, id, firstVideoUri)
+
         val entity = ProjectEntity(
-            id = id,
-            name = state.projectName,
-            createdAt = state.createdAt.takeIf { it > 0 } ?: now,
-            updatedAt = now,
-            durationMs = state.durationMs,
-            tracksJson = gson.toJson(state.tracks),
-            effectsJson = gson.toJson(state.effects),
+            id              = id,
+            name            = state.projectName,
+            createdAt       = state.createdAt.takeIf { it > 0 } ?: now,
+            updatedAt       = now,
+            durationMs      = state.durationMs,
+            tracksJson      = gson.toJson(state.tracks),
+            effectsJson     = gson.toJson(state.effects),
             textOverlaysJson = gson.toJson(state.textOverlays),
-            exportConfigJson = gson.toJson(state.exportConfig)
+            exportConfigJson = gson.toJson(state.exportConfig),
+            thumbnailUri    = thumbUri
         )
         dao.insertProject(entity)
         return id
@@ -47,11 +56,12 @@ class ProjectRepository(context: Context) {
     suspend fun getAllProjects(): List<ProjectSummary> {
         return dao.getAllProjects().map { entity ->
             ProjectSummary(
-                id = entity.id,
-                name = entity.name,
-                durationMs = entity.durationMs,
-                updatedAt = entity.updatedAt,
-                createdAt = entity.createdAt
+                id           = entity.id,
+                name         = entity.name,
+                durationMs   = entity.durationMs,
+                updatedAt    = entity.updatedAt,
+                createdAt    = entity.createdAt,
+                thumbnailUri = entity.thumbnailUri   // ← now included
             )
         }
     }
@@ -60,6 +70,7 @@ class ProjectRepository(context: Context) {
 
     suspend fun deleteProject(id: String) {
         dao.deleteProjectById(id)
+        ThumbnailManager.delete(context, id)   // clean up cached thumbnail
     }
 
     // ─── Rename ───────────────────────────────────────────────────────────────
@@ -71,19 +82,19 @@ class ProjectRepository(context: Context) {
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private fun entityToState(entity: ProjectEntity): EditorUiState {
-        val trackType = object : TypeToken<List<TimelineTrack>>() {}.type
-        val effectType = object : TypeToken<List<EditEffect>>() {}.type
+        val trackType   = object : TypeToken<List<TimelineTrack>>() {}.type
+        val effectType  = object : TypeToken<List<EditEffect>>() {}.type
         val overlayType = object : TypeToken<List<TextOverlay>>() {}.type
 
         return EditorUiState(
-            projectId = entity.id,
-            projectName = entity.name,
-            createdAt = entity.createdAt,
-            durationMs = entity.durationMs,
-            tracks = runCatching {
+            projectId    = entity.id,
+            projectName  = entity.name,
+            createdAt    = entity.createdAt,
+            durationMs   = entity.durationMs,
+            tracks       = runCatching {
                 gson.fromJson<List<TimelineTrack>>(entity.tracksJson, trackType)
             }.getOrDefault(defaultTracks()),
-            effects = runCatching {
+            effects      = runCatching {
                 gson.fromJson<List<EditEffect>>(entity.effectsJson, effectType)
             }.getOrDefault(defaultEffects()),
             textOverlays = runCatching {
@@ -96,11 +107,13 @@ class ProjectRepository(context: Context) {
     }
 }
 
-// Summary shown in Home screen project list
+// ─── Summary shown in Home screen project list ────────────────────────────────
+
 data class ProjectSummary(
-    val id: String,
-    val name: String,
-    val durationMs: Long,
-    val updatedAt: Long,
-    val createdAt: Long
+    val id           : String,
+    val name         : String,
+    val durationMs   : Long,
+    val updatedAt    : Long,
+    val createdAt    : Long,
+    val thumbnailUri : String? = null   // ← new field
 )

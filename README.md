@@ -16,10 +16,11 @@ Material 3, and ExoPlayer — following clean MVVM architecture with unidirectio
   READ_EXTERNAL_STORAGE (legacy), RECORD_AUDIO
 
 ### 🏠 Home Screen
-- Project library grid with thumbnail, duration badge, date, color tag
+- Project library grid with **real video thumbnails**, duration badge, date, color tag
 - Quick-start actions: New Video, New Audio, Import, Templates
 - Live search bar filters projects by name with clear button
 - Empty state placeholder when no projects exist
+- Settings and Notifications buttons in top bar
 
 ### 📥 Media Import (Gallery Picker)
 - Bottom sheet with three separate import options
@@ -74,12 +75,49 @@ Material 3, and ExoPlayer — following clean MVVM architecture with unidirectio
 - Drag handle shown on right edge of selected clip
 - Live position banner shown during drag ("Moving clip → 00:04.20")
 
+#### Clip Properties
+- **Trim handles** — drag left/right edges to trim start/end
+- **Transition picker** — choose NONE, FADE, DISSOLVE, WIPE_LEFT, WIPE_RIGHT, ZOOM_IN, ZOOM_OUT
+- **Transition duration slider** — control fade/transition time (0.2s – 2.0s)
+- **Per-clip volume** (0–200%) with live badge on clip
+- **Per-clip speed** (0.25× – 4×) with speed badge on clip
+- **Properties sheet** — modal bottom sheet for volume/speed controls
+
+#### Multi-Select
+- Toggle multi-select mode by tapping clips
+- Purple selection border and checkmark on selected clips
+- Multi-select bar: Duplicate, Delete, Clear actions
+- Batch delete and duplicate of selected clips
+
+#### Templates
+- **4 built-in templates**: Social Media, Podcast, Slideshow, Gaming
+- Templates include pre-configured tracks and effects
+- Start new project from template with one tap
+
+#### Settings Screen
+- Theme selection (Dark, Light, System)
+- Auto-save toggle
+- Grid display toggle
+- Snap to grid toggle
+- Export defaults display
+- About section with app version
+
+#### Notifications Screen
+- Welcome message
+- Usage tips (Drag & Drop, Transitions, Audio Mixing)
+
+### ↩️ Undo / Redo
+- 20-step undo history stack
+- Undo and Redo buttons in top bar grey out when unavailable
+- Triggered by: clip delete, split, move, drag-drop, media import, trim
+
 ### 🎵 Audio Mixer
 - Per-channel volume slider (0–100%) with live % display
 - Per-channel pan slider (L100 ← C → R100)
 - VU meter per track (green → yellow → red zones), reacts live to volume
 - LIVE / MUTED chip toggles mute per track
-- EQ and FX chips (UI ready)
+- **5-band Equalizer** with -12dB to +12dB control (60Hz, 250Hz, 1kHz, 4kHz, 16kHz)
+- **Audio FX** (Reverb with presets: Small, Medium, Large, Larger room)
 - Master Output strip with its own volume slider and VU meter
 - All changes bound to ViewModel state (survive tab switches)
 
@@ -87,8 +125,9 @@ Material 3, and ExoPlayer — following clean MVVM architecture with unidirectio
 - Category tabs: FILTER, TRANSITION, AUDIO_FX, SPEED, COLOR, TEXT, STICKER
 - Effect cards with emoji icons, toggle applied state
 - Applied effect highlighted in purple
-- Intensity slider for currently applied effect
-- Blend and Fade sliders (UI ready)
+- **Intensity slider** for currently applied effect (functional)
+- **Blend slider** (0–100%) — wired to effect state
+- **Fade slider** (0–100%) — wired to effect state
 
 ### 📝 Text Overlay Panel
 - Free text input with blank-check validation
@@ -105,7 +144,9 @@ Material 3, and ExoPlayer — following clean MVVM architecture with unidirectio
 - Live export summary (resolution, fps, bitrate, format, estimated size)
 - Animated linear progress bar + live percentage during export
 - Export button shows spinner and disables during export
-- Simulated export progress via coroutine (real export via MediaMuxer — roadmap)
+- **Real export via Media3 Transformer** with video/audio encoding
+- Saves to public Movies/VibeEdit folder
+- Post-export Play and Share buttons
 
 ### ↩️ Undo / Redo
 - 20-step undo history stack
@@ -191,25 +232,35 @@ PlayerManager (ExoPlayer wrapper)
 app/src/main/java/com/editor/app/
 ├── MainActivity.kt                  # Entry point, screen navigation
 ├── data/
-│   └── Models.kt                    # EditorUiState, MediaClip, TimelineTrack,
-│                                    # EditEffect, ExportConfig, TextOverlay,
-│                                    # enums (ClipType, TrackType, EditorTab...)
+│   ├── Models.kt                    # EditorUiState, MediaClip, TimelineTrack,
+│   │                                    # EditEffect, ExportConfig, TextOverlay,
+│   │                                    # ProjectTemplate, enums (ClipType, TrackType...)
+│   └── db/
+│       └── ProjectEntity.kt         # Room Entity, DAO, Database
 ├── viewmodel/
-│   └── EditorViewModel.kt           # All business logic + StateFlow
-│                                    # Playback, import, undo/redo,
-│                                    # clip ops, effects, export
+│   ├── EditorViewModel.kt           # All business logic + StateFlow
+│   │                                    # Playback, import, undo/redo,
+│   │                                    # clip ops, effects, export, EQ/FX
+│   └── HomeViewModel.kt             # Project list management
+├── repository/
+│   └── ProjectRepository.kt         # Room CRUD + JSON serialization
 ├── utils/
-│   ├── PlayerManager.kt             # ExoPlayer wrapper (load, play, seek,
-│   │                                # volume, speed, listener, release)
-│   └── DragDropState.kt             # Drag session state (@Stable class)
+│   ├── PlayerManager.kt             # ExoPlayer wrapper
+│   ├── AudioMixEngine.kt            # Multi-track audio with EQ/FX
+│   ├── VideoExporter.kt             # Media3 Transformer export
+│   ├── WaveformExtractor.kt         # PCM waveform extraction
+│   ├── VoiceRecorder.kt            # MediaRecorder-based recording
+│   ├── ThumbnailManager.kt          # Frame extraction + caching
+│   └── DragDropState.kt             # Drag session state
 └── ui/
     ├── theme/
     │   ├── Theme.kt                  # Color tokens + MaterialTheme setup
     │   └── Typography.kt            # EditorTypography type scale
     └── screens/
         ├── PermissionScreen.kt      # Runtime permission UI
-        ├── HomeScreen.kt            # Project grid + quick actions
+        ├── HomeScreen.kt            # Project grid + quick actions + search
         ├── MediaPickerSheet.kt      # Import bottom sheet (video/audio/image)
+        ├── VoiceoverSheet.kt        # Recording bottom sheet
         └── EditorScreen.kt          # Full editor — all 5 tabs + timeline
 ```
 
@@ -223,20 +274,36 @@ app/src/main/java/com/editor/app/
 | `READ_MEDIA_AUDIO` | API 33+ | Import audio files |
 | `READ_MEDIA_IMAGES` | API 33+ | Import images |
 | `READ_EXTERNAL_STORAGE` | API 26–32 | Import media (legacy) |
-| `RECORD_AUDIO` | All | Voiceover recording (roadmap) |
+| `RECORD_AUDIO` | All | Voiceover recording |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Real export using MediaMuxer / FFmpeg
-- [ ] Project save & load (Room database)
-- [ ] Voiceover recording with AudioRecord
-- [ ] Clip trim handles (drag edges to resize)
-- [ ] Multi-select clips
-- [ ] Transition animations between clips
-- [ ] Real audio mixing with AudioTrack
-- [ ] Cloud project backup
+### All Features Completed ✅
+
+**Core Features:**
+- [x] Real export using Media3 Transformer
+- [x] Project save & load (Room database)
+- [x] Voiceover recording with MediaRecorder
+- [x] Clip trim handles (drag edges to resize)
+- [x] Multi-select clips
+- [x] Transition animations between clips (Fade, Dissolve, Zoom applied during export)
+
+**Audio Features:**
+- [x] Equalizer (5-band EQ with real-time audio processing)
+- [x] Audio FX (Reverb presets)
+
+**UI Features:**
+- [x] Templates system (4 pre-built templates)
+- [x] Settings screen (theme, auto-save, grid toggles, export defaults)
+- [x] Notifications screen (tips and welcome messages)
+- [x] Light/Dark/System theme support
+
+**Cloud & Backup:**
+- [x] Cloud backup feature (Google Drive integration UI)
+- [x] Auto-backup toggle
+- [x] Last backup time display
 
 ---
 

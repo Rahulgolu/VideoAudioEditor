@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.editor.app.repository.ProjectSummary
 import com.editor.app.ui.theme.*
 import com.editor.app.viewmodel.HomeViewModel
@@ -66,13 +67,16 @@ private fun colorFor(id: String): Color =
 fun HomeScreen(
     homeViewModel: HomeViewModel,
     onNewProject: () -> Unit,
-    onOpenProject: (String) -> Unit
+    onOpenProject: (String) -> Unit,
+    onTemplatesClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onCloudBackupClick: () -> Unit = {}
 ) {
     val projects  by homeViewModel.projects.collectAsState()
     val isLoading by homeViewModel.isLoading.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
-    // Refresh whenever this screen is (re-)displayed
     LaunchedEffect(Unit) { homeViewModel.refresh() }
 
     Column(
@@ -80,8 +84,14 @@ fun HomeScreen(
             .fillMaxSize()
             .background(DeepBlack)
     ) {
-        HomeTopBar(searchQuery = searchQuery, onSearchChange = { searchQuery = it })
-        QuickActionsRow(onNewProject = onNewProject)
+        HomeTopBar(
+            searchQuery = searchQuery,
+            onSearchChange = { searchQuery = it },
+            onSettingsClick = onSettingsClick,
+            onNotificationsClick = onNotificationsClick,
+            onCloudBackupClick = onCloudBackupClick
+        )
+        QuickActionsRow(onNewProject = onNewProject, onTemplatesClick = onTemplatesClick)
         RecentProjectsSection(
             projects  = projects.filter { it.name.contains(searchQuery, ignoreCase = true) },
             isLoading = isLoading,
@@ -95,7 +105,7 @@ fun HomeScreen(
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 @Composable
-fun HomeTopBar(searchQuery: String, onSearchChange: (String) -> Unit) {
+fun HomeTopBar(searchQuery: String, onSearchChange: (String) -> Unit, onSettingsClick: () -> Unit, onNotificationsClick: () -> Unit, onCloudBackupClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -123,10 +133,13 @@ fun HomeTopBar(searchQuery: String, onSearchChange: (String) -> Unit) {
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = {}) {
+                IconButton(onClick = onCloudBackupClick) {
+                    Icon(Icons.Default.CloudUpload, "Cloud Backup", tint = TextSecondary)
+                }
+                IconButton(onClick = onNotificationsClick) {
                     Icon(Icons.Default.Notifications, "Notifications", tint = TextSecondary)
                 }
-                IconButton(onClick = {}) {
+                IconButton(onClick = onSettingsClick) {
                     Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
                 }
             }
@@ -174,7 +187,7 @@ private val quickActions = listOf(
 )
 
 @Composable
-fun QuickActionsRow(onNewProject: () -> Unit) {
+fun QuickActionsRow(onNewProject: () -> Unit, onTemplatesClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -186,7 +199,10 @@ fun QuickActionsRow(onNewProject: () -> Unit) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(quickActions) { action ->
                 Column(
-                    modifier = Modifier.width(90.dp).clickable(onClick = onNewProject),
+                    modifier = Modifier.width(90.dp).clickable(onClick = when (action.label) {
+                        "Templates" -> onTemplatesClick
+                        else -> onNewProject
+                    }),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -372,22 +388,43 @@ fun ProjectCard(
         border = BorderStroke(1.dp, Color(0xFF22223A))
     ) {
         Column {
-            // Thumbnail gradient
+            // Thumbnail
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp)
-                    .background(
-                        Brush.linearGradient(listOf(color.copy(0.4f), color.copy(0.1f)))
-                    ),
+                    .height(80.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.PlayCircle,
-                    contentDescription = null,
-                    tint   = Color.White.copy(0.5f),
-                    modifier = Modifier.size(32.dp)
-                )
+                if (!project.thumbnailUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = project.thumbnailUri,
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Brush.linearGradient(listOf(color.copy(0.3f), color.copy(0.1f))))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .background(
+                                Brush.linearGradient(listOf(color.copy(0.4f), color.copy(0.1f)))
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.PlayCircle,
+                            contentDescription = null,
+                            tint   = Color.White.copy(0.5f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
                 if (project.durationMs > 0) {
                     Box(
                         modifier = Modifier

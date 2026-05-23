@@ -67,7 +67,10 @@ data class TimelineTrack(
     val isLocked: Boolean = false,
     val volume: Float = 1f,
     val pan: Float = 0f,
-    val color: Color = Color(0xFF0088FF)
+    val color: Color = Color(0xFF0088FF),
+    val eqBands: List<Float> = listOf(0f, 0f, 0f, 0f, 0f),
+    val fxType: String = "None",
+    val fxIntensity: Float = 0f
 )
 
 data class EditEffect(
@@ -76,7 +79,9 @@ data class EditEffect(
     val category: EffectCategory,
     val emoji: String,
     val isApplied: Boolean = false,
-    val intensity: Float = 0.5f
+    val intensity: Float = 0.5f,
+    val blend: Float = 0.5f,
+    val fade: Float = 0.3f
 )
 
 data class ExportConfig(
@@ -95,6 +100,15 @@ data class TextOverlay(
     val durationMs: Long = 3000L
 )
 
+data class ProjectTemplate(
+    val id: String,
+    val name: String,
+    val description: String,
+    val emoji: String,
+    val tracks: List<TimelineTrack>,
+    val effects: List<EditEffect> = emptyList()
+)
+
 data class EditorUiState(
     val projectId: String = "",
     val projectName: String = "Untitled Project",
@@ -105,8 +119,8 @@ data class EditorUiState(
     val isPlaying: Boolean = false,
     val zoomLevel: Float = 1f,
     val selectedClipId: String? = null,
-    val selectedClipIds: Set<String> = emptySet(),   // ← add here
-    val isMultiSelectMode: Boolean = false,          // ← add here
+    val selectedClipIds: Set<String> = emptySet(),
+    val isMultiSelectMode: Boolean = false,
     val activeTab: EditorTab = EditorTab.EDIT,
     val masterVolume: Float = 1f,
     val playbackSpeed: Float = 1f,
@@ -117,12 +131,19 @@ data class EditorUiState(
     val isExporting: Boolean = false,
     val exportProgress: Float = 0f,
     val isSaving: Boolean = false,
+    val exportError     : String? = null,
+    val exportedFilePath : String? = null,
+    val exportedFileUri : String? = null,
+    val isSimulatedExport : Boolean = false,
     val lastSavedAt: Long = 0L,
     val undoStack: List<List<TimelineTrack>> = emptyList(),
     val redoStack: List<List<TimelineTrack>> = emptyList(),
     val isRecording: Boolean = false,
     val recordingAmplitude: Int = 0,
-    val recordingDurationMs: Long = 0L
+    val recordingDurationMs: Long = 0L,
+    val selectedTemplateId: String? = null,
+    val showSettings: Boolean = false,
+    val showNotifications: Boolean = false
 )
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
